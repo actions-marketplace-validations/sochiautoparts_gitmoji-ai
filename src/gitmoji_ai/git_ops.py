@@ -32,16 +32,21 @@ def get_repo_info(path: str = ".") -> RepoInfo:
         branch = run_git(["branch", "--show-current"], path)
         total = int(run_git(["rev-list", "--count", "HEAD"], path))
 
-        staged = run_git(["diff", "--cached", "--quiet"], path, check=False)
-        unstaged = run_git(["diff", "--quiet"], path, check=False)
+        # Use subprocess directly for exit-code-based checks
+        staged_result = subprocess.run(
+            ["git", "diff", "--cached", "--quiet"], cwd=path, capture_output=True, text=True, timeout=30,
+        )
+        unstaged_result = subprocess.run(
+            ["git", "diff", "--quiet"], cwd=path, capture_output=True, text=True, timeout=30,
+        )
 
         return RepoInfo(
             name=name,
             root=root,
             current_branch=branch,
             is_git_repo=True,
-            has_staged_changes=staged != 0,
-            has_unstaged_changes=unstaged != 0,
+            has_staged_changes=staged_result.returncode != 0,
+            has_unstaged_changes=unstaged_result.returncode != 0,
             total_commits=total,
         )
     except Exception:
@@ -109,17 +114,23 @@ def get_commit_tags(path: str = ".") -> dict[str, str]:
 
 def stage_all(path: str = ".") -> bool:
     """Stage all changes"""
-    result = run_git(["add", "-A"], path, check=False)
-    return result == 0
+    try:
+        subprocess.run(["git", "add", "-A"], cwd=path, capture_output=True, text=True, timeout=30, check=True)
+        return True
+    except Exception:
+        return False
 
 
 def create_commit(message: str, path: str = ".", sign: bool = False) -> bool:
     """Create a commit with the given message"""
-    args = ["commit", "-m", message]
-    if sign:
-        args.append("-S")
-    result = run_git(args, path, check=False)
-    return result == 0
+    try:
+        args = ["git", "commit", "-m", message]
+        if sign:
+            args.append("-S")
+        subprocess.run(args, cwd=path, capture_output=True, text=True, timeout=30, check=True)
+        return True
+    except Exception:
+        return False
 
 
 def run_git(
@@ -127,8 +138,8 @@ def run_git(
     cwd: str = ".",
     check: bool = True,
     default: str = "",
-) -> str | int:
-    """Run a git command and return output"""
+) -> str:
+    """Run a git command and return output as string. Returns default on failure."""
     try:
         result = subprocess.run(
             ["git"] + args,
@@ -137,12 +148,11 @@ def run_git(
             text=True,
             timeout=30,
         )
-        if check and result.returncode != 0:
-            logger.warning(f"Git command failed: git {' '.join(args)} — {result.stderr.strip()}")
+        if result.returncode != 0:
+            if check:
+                logger.warning(f"Git command failed: git {' '.join(args)} — {result.stderr.strip()}")
             return default
-        if check:
-            return result.stdout.strip()
-        return result.returncode
+        return result.stdout.strip()
     except subprocess.TimeoutExpired:
         logger.error("Git command timed out")
         return default
