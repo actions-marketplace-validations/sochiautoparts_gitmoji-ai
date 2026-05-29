@@ -33,6 +33,9 @@ jobs:
       - name: Generate Changelog
         env:
           GMAI_OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          STARSPAY_API_URL: ${{ secrets.STARSPAY_API_URL }}
+          STARSPAY_API_KEY: ${{ secrets.STARSPAY_API_KEY }}
+          LICENSE_KEY: ${{ secrets.LICENSE_KEY }}
         run: |
           gmai changelog \
             --version "${{ github.event.inputs.version || 'Unreleased' }}" \

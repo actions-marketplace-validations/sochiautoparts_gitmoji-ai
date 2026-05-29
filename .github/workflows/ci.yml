@@ -34,6 +34,10 @@ jobs:
         continue-on-error: true
 
       - name: Run tests
+        env:
+          STARSPAY_API_URL: ${{ secrets.STARSPAY_API_URL }}
+          STARSPAY_API_KEY: ${{ secrets.STARSPAY_API_KEY }}
+          LICENSE_KEY: ${{ secrets.LICENSE_KEY }}
         run: pytest -v tests/
 
       - name: Upload coverage

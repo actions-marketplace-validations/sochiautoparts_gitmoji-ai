@@ -12,7 +12,7 @@
 [![License](https://img.shields.io/github/license/sochiautoparts/gitmoji-ai?label=License)](LICENSE)
 [![Stars](https://img.shields.io/github/stars/sochiautoparts/gitmoji-ai?style=social)](https://github.com/sochiautoparts/gitmoji-ai)
 
-[Installation](#-installation) • [Quick Start](#-quick-start) • [Features](#-features) • [GitHub Action](#-github-action) • [Pro](#-pro-version) • [Contributing](#-contributing)
+[Installation](#-installation) • [Quick Start](#-quick-start) • [Features](#-features) • [GitHub Action](#-github-action) • [Pro](#-pro-version--starspay) • [Contributing](#-contributing)
 
 </div>
 
@@ -236,7 +236,7 @@ jobs:
 
 ---
 
-## ⭐ Pro Version
+## ⭐ Pro Version & StarsPay
 
 ### Why upgrade?
 
@@ -246,11 +246,12 @@ jobs:
 - **Team features** — shared settings and changelogs
 - **Priority support** — faster responses
 
-### 💳 Get Pro via Telegram Stars (instant!)
+### 💳 StarsPay — Pay with Telegram Stars
 
 Purchase directly in Telegram — pay with Stars, get your license key in seconds!
 
-👉 **[@allstarspay_bot](https://t.me/allstarspay_bot)** — click to buy!
+- **Bot:** 👉 [@allstarspay_bot](https://t.me/allstarspay_bot)
+- **Mini App:** 👉 [StarsPay Mini App](https://sochiautoparts.github.io/stars-pay-bot/)
 
 | Plan | Price | Best for |
 |------|-------|----------|
@@ -265,6 +266,7 @@ Purchase directly in Telegram — pay with Stars, get your license key in second
 ```bash
 # 1. Open @allstarspay_bot in Telegram and pay with Stars
 #    👉 https://t.me/allstarspay_bot
+#    Or use the Mini App: https://sochiautoparts.github.io/stars-pay-bot/
 
 # 2. Copy your license key (format: SP-GMA-xxxxxx)
 
@@ -278,6 +280,20 @@ gmai pro activate SP-GMA-xxxxxxxx
 gmai pro activate YOUR-LICENSE-KEY
 gmai pro status    # Check your license
 ```
+
+### Environment Variables for CI/CD
+
+For automated environments (GitHub Actions, Docker, etc.), you can configure StarsPay license checks via environment variables:
+
+```bash
+STARSPAY_API_URL=https://your-starspay-instance.onrender.com  # StarsPay API URL (empty = no check)
+STARSPAY_API_KEY=your-api-key                                 # StarsPay API key
+LICENSE_KEY=SP-GMA-xxxxxxxx                                   # Your license key
+```
+
+- If `STARSPAY_API_URL` is not set or empty, the license check is skipped and basic (free) usage is allowed.
+- If configured, the tool will POST to `{STARSPAY_API_URL}/api/v1/verify` with header `X-API-Key` and body `{"key": "..."}` to verify the license.
+- Falls back to local cache if the API is unreachable.
 
 ---
 
@@ -294,6 +310,11 @@ GMAI_DEFAULT_LANGUAGE=en          # Default commit language
 GMAI_COMMIT_STYLE=conventional    # Default commit style
 GMAI_OPENAI_MODEL=gpt-4o-mini    # AI model
 GMAI_PRO_LICENSE_KEY=            # Pro license key
+
+# StarsPay integration (for CI/CD)
+STARSPAY_API_URL=                # StarsPay API URL (empty = no check)
+STARSPAY_API_KEY=                # StarsPay API key
+LICENSE_KEY=                     # License key for Pro features
 ```
 
 ### Git Hook
@@ -319,7 +340,7 @@ gitmoji-ai/
 │   ├── git_ops.py      # Git operations (diff, commit)
 │   ├── changelog.py    # Changelog generator
 │   ├── config.py       # Configuration management
-│   ├── usage.py        # Usage tracking & limits
+│   ├── usage.py        # Usage tracking & StarsPay license validation
 │   └── suggest.py      # Quick suggest (for hooks)
 ├── action/
 │   └── action.yml      # GitHub Action
@@ -355,6 +376,6 @@ MIT License — see [LICENSE](LICENSE) for details.
 
 **Made with 🤖 and ❤️ by [GitMoji AI](https://github.com/sochiautoparts/gitmoji-ai)**
 
-[⭐ Star on GitHub](https://github.com/sochiautoparts/gitmoji-ai) • [🐛 Report Bug](https://github.com/sochiautoparts/gitmoji-ai/issues) • [💡 Request Feature](https://github.com/sochiautoparts/gitmoji-ai/issues)
+[⭐ Star on GitHub](https://github.com/sochiautoparts/gitmoji-ai) • [🐛 Report Bug](https://github.com/sochiautoparts/gitmoji-ai/issues) • [💡 Request Feature](https://github.com/sochiautoparts/gitmoji-ai/issues) • [💎 Get Pro via StarsPay](https://t.me/allstarspay_bot)
 
 </div>

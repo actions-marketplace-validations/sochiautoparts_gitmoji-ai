@@ -3,6 +3,7 @@ Usage tracking — Free tier limits and Pro license validation
 Supports StarsPay API for real license validation
 """
 
+import os
 import sqlite3
 import time
 import logging
@@ -15,9 +16,10 @@ from gitmoji_ai.config import get_settings
 
 logger = logging.getLogger(__name__)
 
-# StarsPay API configuration
-STARSPAY_API_URL = "https://starspay.example.com"  # Replace with your server
-STARSPAY_API_KEY = ""  # Set via GMAI_STARSPAY_API_KEY env var
+# StarsPay API configuration — read from environment with defaults
+STARSPAY_API_URL = os.environ.get("STARSPAY_API_URL", "")
+STARSPAY_API_KEY = os.environ.get("STARSPAY_API_KEY", "")
+LICENSE_KEY = os.environ.get("LICENSE_KEY", "")
 PRODUCT_ID = "gitmoji-ai"
 
 
@@ -77,7 +79,7 @@ def check_limit(action: str) -> tuple[bool, int]:
     settings = get_settings()
 
     # Pro users have no limits
-    if settings.is_pro:
+    if settings.is_pro or is_pro_via_starspay():
         return True, 999
 
     used = get_monthly_usage(action)
@@ -93,28 +95,102 @@ def check_limit(action: str) -> tuple[bool, int]:
     return used < limit, remaining
 
 
-def validate_license_via_api(key: str, product_id: str = PRODUCT_ID) -> dict:
+def verify_license_via_starspay(key: str) -> dict:
     """
-    Validate a license key via StarsPay API.
+    Verify a license key via the StarsPay REST API.
+    POST {STARSPAY_API_URL}/api/v1/verify
+    Header: X-API-Key: {STARSPAY_API_KEY}
+    Body: {"key": "{LICENSE_KEY}"}
     Returns: {"valid": bool, "plan_id": str, "expires_at": float, ...}
     """
-    api_url = getattr(settings_instance(), 'starspay_api_url', STARSPAY_API_URL)
-    api_key = getattr(settings_instance(), 'starspay_api_key', STARSPAY_API_KEY)
+    api_url = os.environ.get("STARSPAY_API_URL", STARSPAY_API_URL)
+    api_key = os.environ.get("STARSPAY_API_KEY", STARSPAY_API_KEY)
+
+    if not api_url:
+        logger.debug("STARSPAY_API_URL not configured, skipping API verification")
+        return {"valid": False, "reason": "not_configured"}
 
     try:
-        response = httpx.get(
-            f"{api_url}/api/v1/validate",
-            params={"key": key, "product": product_id},
+        response = httpx.post(
+            f"{api_url}/api/v1/verify",
+            json={"key": key},
             headers={"X-API-Key": api_key},
             timeout=10,
         )
         if response.status_code == 200:
-            return response.json()
+            data = response.json()
+            if data.get("valid"):
+                return {
+                    "valid": True,
+                    "plan_id": data.get("plan_id", "pro"),
+                    "expires_at": data.get("expires_at"),
+                    "email": data.get("email", ""),
+                    "source": "starspay_api",
+                }
+            return {
+                "valid": False,
+                "reason": data.get("reason", "invalid"),
+            }
+        elif response.status_code == 401:
+            logger.warning("StarsPay API key is invalid")
+            return {"valid": False, "reason": "api_key_invalid"}
+        elif response.status_code == 404:
+            logger.warning("License key not found in StarsPay")
+            return {"valid": False, "reason": "not_found"}
+        else:
+            logger.warning(f"StarsPay API returned status {response.status_code}")
+            return {"valid": False, "reason": f"api_error_{response.status_code}"}
+    except httpx.TimeoutException:
+        logger.warning("StarsPay API request timed out")
+        return {"valid": False, "reason": "timeout"}
+    except httpx.ConnectError:
+        logger.warning("Cannot connect to StarsPay API")
+        return {"valid": False, "reason": "connection_error"}
     except Exception as e:
-        logger.warning(f"API validation failed, falling back to local: {e}")
+        logger.warning(f"StarsPay API verification failed: {e}")
+        return {"valid": False, "reason": "unknown_error"}
 
-    # Fallback: local validation
-    return _local_validate(key)
+
+def is_pro_via_starspay() -> bool:
+    """
+    Check if the current user has a valid Pro license via StarsPay.
+    Reads STARSPAY_API_URL, STARSPAY_API_KEY, and LICENSE_KEY from env.
+    - If STARSPAY_API_URL is not set, returns False (no check, basic usage).
+    - If configured, verifies the license key via API.
+    - Falls back to local cache if API is unreachable.
+    """
+    api_url = os.environ.get("STARSPAY_API_URL", STARSPAY_API_URL)
+    license_key = os.environ.get("LICENSE_KEY", LICENSE_KEY)
+
+    # Not configured — allow basic usage
+    if not api_url:
+        return False
+
+    if not license_key:
+        return False
+
+    # Try StarsPay API verification
+    result = verify_license_via_starspay(license_key)
+    if result.get("valid"):
+        return True
+
+    # Fallback: check local cache
+    return _local_check_pro(license_key)
+
+
+def _local_check_pro(key: str) -> bool:
+    """Check if a license key is valid locally (cached from previous API check)"""
+    if not key or len(key) < 10:
+        return False
+
+    conn = _get_db()
+    cursor = conn.execute(
+        "SELECT * FROM license WHERE key = ? AND active = 1 AND expires_at > ?",
+        (key, time.time()),
+    )
+    row = cursor.fetchone()
+    conn.close()
+    return row is not None
 
 
 def _local_validate(key: str) -> dict:
@@ -142,9 +218,44 @@ def _local_validate(key: str) -> dict:
     return {"valid": False, "reason": "not_found"}
 
 
-def settings_instance():
-    """Get settings instance (avoid circular import issues)"""
-    return get_settings()
+def validate_license_via_api(key: str, product_id: str = PRODUCT_ID) -> dict:
+    """
+    Validate a license key via StarsPay API.
+    Uses POST /api/v1/verify endpoint.
+    Returns: {"valid": bool, "plan_id": str, "expires_at": float, ...}
+    """
+    api_url = os.environ.get("STARSPAY_API_URL", STARSPAY_API_URL)
+    api_key = os.environ.get("STARSPAY_API_KEY", STARSPAY_API_KEY)
+
+    if not api_url:
+        logger.debug("STARSPAY_API_URL not configured, using local validation")
+        return _local_validate(key)
+
+    try:
+        response = httpx.post(
+            f"{api_url}/api/v1/verify",
+            json={"key": key},
+            headers={"X-API-Key": api_key},
+            timeout=10,
+        )
+        if response.status_code == 200:
+            data = response.json()
+            if data.get("valid"):
+                return {
+                    "valid": True,
+                    "plan_id": data.get("plan_id", "pro"),
+                    "expires_at": data.get("expires_at"),
+                    "source": "starspay_api",
+                }
+            return {
+                "valid": False,
+                "reason": data.get("reason", "invalid"),
+            }
+    except Exception as e:
+        logger.warning(f"StarsPay API validation failed, falling back to local: {e}")
+
+    # Fallback: local validation
+    return _local_validate(key)
 
 
 def activate_license(key: str, email: str = "") -> bool:
@@ -184,6 +295,17 @@ def check_license_valid() -> bool:
     """Check if current license is valid (local check)"""
     settings = get_settings()
     if not settings.pro_license_key:
+        # Also check LICENSE_KEY env var
+        env_key = os.environ.get("LICENSE_KEY", LICENSE_KEY)
+        if env_key:
+            conn = _get_db()
+            cursor = conn.execute(
+                "SELECT * FROM license WHERE key = ? AND active = 1 AND expires_at > ?",
+                (env_key, time.time()),
+            )
+            row = cursor.fetchone()
+            conn.close()
+            return row is not None
         return False
 
     conn = _get_db()
@@ -198,16 +320,16 @@ def check_license_valid() -> bool:
 
 def check_license_with_api() -> dict:
     """
-    Full license check via API + local.
+    Full license check via StarsPay API + local.
     Returns detailed info about the license status.
     """
     settings = get_settings()
-    key = settings.pro_license_key
+    key = settings.pro_license_key or os.environ.get("LICENSE_KEY", LICENSE_KEY)
 
     if not key:
         return {"valid": False, "reason": "no_key", "tier": "free"}
 
-    # Try API first
+    # Try StarsPay API first
     result = validate_license_via_api(key)
 
     if result.get("valid"):
@@ -215,7 +337,7 @@ def check_license_with_api() -> dict:
             "valid": True,
             "tier": result.get("plan_id", "pro"),
             "expires_at": result.get("expires_at"),
-            "source": "api"
+            "source": "starspay_api",
         }
 
     # Fallback to local
@@ -223,7 +345,7 @@ def check_license_with_api() -> dict:
         return {
             "valid": True,
             "tier": "pro",
-            "source": "local_cache"
+            "source": "local_cache",
         }
 
     return {"valid": False, "reason": result.get("reason", "expired"), "tier": "free"}
@@ -236,6 +358,6 @@ def get_usage_stats() -> dict:
         "changelogs_this_month": get_monthly_usage("changelog"),
         "commit_limit": get_settings().free_commits_per_month,
         "changelog_limit": get_settings().free_changelog_per_month,
-        "is_pro": get_settings().is_pro,
+        "is_pro": get_settings().is_pro or is_pro_via_starspay(),
         "license_status": check_license_with_api(),
     }
