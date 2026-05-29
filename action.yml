@@ -1,5 +1,5 @@
-name: 'GitMoji AI — Auto Commit Messages'
-description: '🤖 AI-powered commit messages and changelog generator using OpenAI. Generate perfect conventional commits automatically.'
+name: 'GitMoji AI — Commit Suggestions'
+description: '🤖 AI-powered commit message suggestions and changelog generator using OpenAI. Suggests conventional commits without auto-committing.'
 author: 'sochiautoparts'
 branding:
   icon: 'git-commit'
@@ -59,7 +59,13 @@ runs:
         gmai info
         echo ""
         echo "💡 Suggested commit messages:"
-        gmai commit --yes 2>/dev/null || echo "No staged changes to analyze"
+        SUGGESTION=$(gmai suggest --quiet 2>/dev/null) || true
+        if [ -n "$SUGGESTION" ]; then
+          echo "  $SUGGESTION"
+          echo "::notice title=GitMoji AI Suggestion::$SUGGESTION"
+        else
+          echo "No staged changes to analyze"
+        fi
 
     - name: Generate Changelog
       if: ${{ inputs.generate-changelog == 'true' }}

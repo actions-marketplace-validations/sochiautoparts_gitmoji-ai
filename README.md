@@ -62,8 +62,8 @@ Select commit [1/2/3/e(q)dit/(q)uit]: 1
 | Git hook integration | ✅ | ✅ |
 | GitHub Action | ✅ | ✅ |
 | No watermark | ❌ | ✅ |
-| Custom commit styles | ❌ | ✅ |
-| Team features | ❌ | ✅ |
+| Custom commit styles | ❌ | 🔜 Coming Soon |
+| Team features | ❌ | 🔜 Coming Soon |
 | Priority support | ❌ | ✅ |
 
 ---

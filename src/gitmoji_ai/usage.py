@@ -60,9 +60,15 @@ def _get_db() -> sqlite3.Connection:
             expires_at REAL,
             plan_id TEXT DEFAULT 'pro',
             email TEXT DEFAULT '',
-            active INTEGER DEFAULT 1
+            active INTEGER DEFAULT 1,
+            last_verified_at REAL
         )
     """)
+    # Migration: add last_verified_at column if it doesn't exist
+    try:
+        conn.execute("ALTER TABLE license ADD COLUMN last_verified_at REAL")
+    except sqlite3.OperationalError:
+        pass  # Column already exists
     conn.commit()
     return conn
 
@@ -286,9 +292,9 @@ def _save_license_locally(key: str, result: dict) -> None:
         expires_at = result.get("expires_at", 0) or (now + 30 * 86400)
         plan = result.get("plan", "pro")
         conn.execute(
-            "INSERT OR REPLACE INTO license (key, activated_at, expires_at, plan_id, email, active) "
-            "VALUES (?, ?, ?, ?, '', 1)",
-            (key, now, expires_at, plan),
+            "INSERT OR REPLACE INTO license (key, activated_at, expires_at, plan_id, email, active, last_verified_at) "
+            "VALUES (?, ?, ?, ?, '', 1, ?)",
+            (key, now, expires_at, plan, now),
         )
         conn.commit()
         conn.close()
@@ -296,15 +302,25 @@ def _save_license_locally(key: str, result: dict) -> None:
         logger.warning("Failed to save license locally: %s", exc)
 
 
+_LOCAL_CACHE_MAX_AGE = 7 * 86400  # 7 days — local cache is only valid this long after last online verification
+
+
 def _local_check_pro(key: str) -> bool:
-    """Check if a license key is valid locally (cached from previous verification)"""
+    """Check if a license key is valid locally (cached from previous verification).
+
+    The local cache is only valid for 7 days after the last successful
+    online verification, to prevent indefinite Pro status via DB editing.
+    """
     if not key or len(key) < 10:
         return False
 
+    now = time.time()
+    cache_cutoff = now - _LOCAL_CACHE_MAX_AGE
     conn = _get_db()
     cursor = conn.execute(
-        "SELECT * FROM license WHERE key = ? AND active = 1 AND expires_at > ?",
-        (key, time.time()),
+        "SELECT * FROM license WHERE key = ? AND active = 1 AND expires_at > ? "
+        "AND (last_verified_at IS NOT NULL AND last_verified_at > ?)",
+        (key, now, cache_cutoff),
     )
     row = cursor.fetchone()
     conn.close()
@@ -335,7 +351,7 @@ def activate_license(key: str, email: str = "") -> bool:
 
 
 def check_license_valid() -> bool:
-    """Check if current license is valid (local SQLite check)"""
+    """Check if current license is valid (local SQLite check with 7-day cache expiry)"""
     license_key = os.getenv("LICENSE_KEY", "")
     if not license_key:
         settings = get_settings()
@@ -343,10 +359,13 @@ def check_license_valid() -> bool:
     if not license_key:
         return False
 
+    now = time.time()
+    cache_cutoff = now - _LOCAL_CACHE_MAX_AGE
     conn = _get_db()
     cursor = conn.execute(
-        "SELECT * FROM license WHERE key = ? AND active = 1 AND expires_at > ?",
-        (license_key, time.time()),
+        "SELECT * FROM license WHERE key = ? AND active = 1 AND expires_at > ? "
+        "AND (last_verified_at IS NOT NULL AND last_verified_at > ?)",
+        (license_key, now, cache_cutoff),
     )
     row = cursor.fetchone()
     conn.close()

@@ -22,6 +22,7 @@ from gitmoji_ai.git_ops import (
 from gitmoji_ai.ai_engine import generate_commit_messages, analyze_diff
 from gitmoji_ai.changelog import generate_changelog, update_changelog_file
 from gitmoji_ai.usage import track_usage, check_limit, get_usage_stats, activate_license
+from gitmoji_ai.suggest import suggest_commit
 
 console = Console()
 app = typer.Typer(
@@ -411,6 +412,27 @@ def pro(
     else:
         console.print(f"[red]Unknown action: {action}[/red]")
         console.print("[dim]Use: login, activate, status, purchase, or logout[/dim]")
+
+
+@app.command()
+def suggest(
+    path: str = typer.Option(".", "--path", "-p", help="Repository path"),
+    language: str = typer.Option("en", "--lang", "-l", help="Language: en, ru, es, de, fr"),
+    style: str = typer.Option("conventional", "--style", "-s", help="Commit style: conventional, emoji, plain"),
+    quiet: bool = typer.Option(False, "--quiet", "-q", help="Output only the message text (for hooks)"),
+):
+    """💡 Quick suggest a commit message (non-interactive, for git hooks)"""
+    message = suggest_commit(path=path, language=language, style=style)
+    if message:
+        if quiet:
+            # Plain text output for hook consumption
+            print(message)
+        else:
+            console.print(f"[green]{message}[/green]")
+    else:
+        if not quiet:
+            console.print("[dim]No changes to suggest for.[/dim]")
+        raise typer.Exit(1)
 
 
 @app.command()

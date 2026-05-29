@@ -23,10 +23,10 @@ class Settings(BaseSettings):
 
     # Pro activation
     pro_license_key: str = ""
-    pro_api_url: str = "https://api.gitmoji-ai.dev/v1"
+    pro_api_url: str = ""
 
-    # StarsPay integration
-    starspay_api_url: str = "https://starspay.example.com"
+    # StarsPay integration (optional REST API fallback)
+    starspay_api_url: str = ""
     starspay_api_key: str = ""
 
     # Git defaults
@@ -41,8 +41,12 @@ class Settings(BaseSettings):
 
     @property
     def is_pro(self) -> bool:
-        """Check if Pro license is active"""
-        return bool(self.pro_license_key)
+        """Check if Pro license is active (verified, not just set)"""
+        if not self.pro_license_key:
+            return False
+        # Defer to actual verification instead of just checking the key is set
+        from gitmoji_ai.usage import is_pro as verified_is_pro
+        return verified_is_pro()
 
     @property
     def db_path(self) -> Path:
