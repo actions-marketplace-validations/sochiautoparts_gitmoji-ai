@@ -41,12 +41,8 @@ class Settings(BaseSettings):
 
     @property
     def is_pro(self) -> bool:
-        """Check if Pro license is active (verified, not just set)"""
-        if not self.pro_license_key:
-            return False
-        # Defer to actual verification instead of just checking the key is set
-        from gitmoji_ai.usage import is_pro as verified_is_pro
-        return verified_is_pro()
+        """Check if Pro license key is set. Actual verification done in usage.py"""
+        return bool(self.pro_license_key)
 
     @property
     def db_path(self) -> Path:
@@ -57,6 +53,11 @@ class Settings(BaseSettings):
         self.config_dir.mkdir(parents=True, exist_ok=True)
 
 
+_settings_instance = None
+
 def get_settings() -> Settings:
     """Get cached settings instance"""
-    return Settings()
+    global _settings_instance
+    if _settings_instance is None:
+        _settings_instance = Settings()
+    return _settings_instance
