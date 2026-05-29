@@ -35,7 +35,7 @@ GITMOJI_MAP = {
     "remove-deps": "➖",
     "config": "🔧",
     "docker": "🐳",
-    "ui": "lipstick",
+    "ui": "💄",
     "init": "🎉",
     "wip": "🚧",
     "dead-code": "⚰️",
