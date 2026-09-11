@@ -548,29 +548,16 @@ def team(
         try:
             config_path = init_team_config(path)
             console.print(Panel(
-                f"[bold green]✅ Team config created![/bold green]
-
-"
-                f"  File: [cyan]{config_path}[/cyan]
-
-"
-                f"Edit the file to define your team's commit conventions.
-"
-                f"Commit it to the repo so all team members follow the same rules.
-
-"
-                f"  [bold]Supported rules:[/bold]
-"
-                f"  • required_types — only allow specific commit types
-"
-                f"  • required_scopes — enforce scope usage
-"
-                f"  • max_subject_length — limit subject line length
-"
-                f"  • custom_types — alias custom types to conventional types
-"
-                f"  • commit_style — set team-wide commit style
-"
+                f"[bold green]✅ Team config created![/bold green]\n\n"
+                f"  File: [cyan]{config_path}[/cyan]\n\n"
+                f"Edit the file to define your team's commit conventions.\n"
+                f"Commit it to the repo so all team members follow the same rules.\n\n"
+                f"  [bold]Supported rules:[/bold]\n"
+                f"  • required_types — only allow specific commit types\n"
+                f"  • required_scopes — enforce scope usage\n"
+                f"  • max_subject_length — limit subject line length\n"
+                f"  • custom_types — alias custom types to conventional types\n"
+                f"  • commit_style — set team-wide commit style\n"
                 f"  • disallowed_types — ban certain commit types",
                 title="👥 Team Config",
                 border_style="green",
@@ -590,18 +577,12 @@ def team(
 
         config = result["config"]
         console.print(Panel(
-            f"  [bold]Style:[/bold] {config.commit_style}
-"
-            f"  [bold]Language:[/bold] {config.language}
-"
-            f"  [bold]Max subject length:[/bold] {config.max_subject_length}
-"
-            f"  [bold]Require scope:[/bold] {'Yes' if config.require_scope else 'No'}
-"
-            f"  [bold]Required types:[/bold] {', '.join(config.required_types) or 'All'}
-"
-            f"  [bold]Required scopes:[/bold] {', '.join(config.required_scopes) or 'Any'}
-"
+            f"  [bold]Style:[/bold] {config.commit_style}\n"
+            f"  [bold]Language:[/bold] {config.language}\n"
+            f"  [bold]Max subject length:[/bold] {config.max_subject_length}\n"
+            f"  [bold]Require scope:[/bold] {'Yes' if config.require_scope else 'No'}\n"
+            f"  [bold]Required types:[/bold] {', '.join(config.required_types) or 'All'}\n"
+            f"  [bold]Required scopes:[/bold] {', '.join(config.required_scopes) or 'Any'}\n"
             f"  [bold]Disallowed types:[/bold] {', '.join(config.disallowed_types) or 'None'}",
             title="👥 Team Rules",
             border_style="blue",
@@ -675,14 +656,9 @@ def support():
 """
 
     console.print(Panel(
-        f"[bold]🆘 Support Request Template[/bold]
-
-"
-        f"Copy the template below and create a new issue:
-"
-        f"[link]https://github.com/sochiautoparts/gitmoji-ai/issues/new[/link]
-
-"
+        f"[bold]🆘 Support Request Template[/bold]\n\n"
+        f"Copy the template below and create a new issue:\n"
+        f"[link]https://github.com/sochiautoparts/gitmoji-ai/issues/new[/link]\n\n"
         f"[dim]The template includes your environment info for faster debugging.[/dim]",
         border_style="blue",
     ))
