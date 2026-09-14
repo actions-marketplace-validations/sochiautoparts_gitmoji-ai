@@ -35,6 +35,25 @@ LICENSES_JSON_URL = (
     "https://raw.githubusercontent.com/sochiautoparts/stars-pay-bot/main/data/licenses.json"
 )
 
+# Verification failure reasons that mean "could not verify" (network/server
+# problems) rather than "key rejected" — for these we fall back to the
+# locally cached license instead of downgrading to Free.
+_NETWORK_FAILURE_REASONS = {
+    "json_error",          # exception while fetching licenses.json (incl. network errors)
+    "json_fetch_failed",   # non-200 from raw.githubusercontent.com (e.g. 5xx)
+    "timeout",
+    "connection_error",
+    "unknown_error",
+}
+
+
+def _is_network_failure(reason: object) -> bool:
+    """True if a verification failure reason means 'could not verify', not 'key rejected'."""
+    if reason in _NETWORK_FAILURE_REASONS:
+        return True
+    r = str(reason or "")
+    return r.startswith("api_error_5")  # 5xx from the StarsPay verification API
+
 
 # ---------------------------------------------------------------------------
 # Database helpers
@@ -249,11 +268,20 @@ def verify_license(license_key: str) -> dict:
 # is_pro — with 1-hour in-memory cache
 # ---------------------------------------------------------------------------
 
+def _get_license_key() -> str:
+    """Resolve the Pro license key: LICENSE_KEY or GMAI_PRO_LICENSE_KEY env, then settings."""
+    key = os.getenv("LICENSE_KEY") or os.getenv("GMAI_PRO_LICENSE_KEY") or get_settings().pro_license_key
+    return key or ""
+
+
 def is_pro() -> bool:
     """Check if the current user has a valid Pro license.
 
-    Reads the LICENSE_KEY env var, calls verify_license(), and caches
-    the result for 1 hour to avoid repeated network calls.
+    Reads the LICENSE_KEY / GMAI_PRO_LICENSE_KEY env vars (or settings),
+    calls verify_license(), and caches the result for 1 hour to avoid
+    repeated network calls. If verification fails due to a network/server
+    problem, falls back to the locally cached license (valid for 7 days
+    after the last successful online verification).
     """
     global _pro_cache
 
@@ -262,8 +290,8 @@ def is_pro() -> bool:
     if _pro_cache["result"] is not None and (now - _pro_cache["timestamp"]) < _PRO_CACHE_TTL:
         return _pro_cache["result"]
 
-    # Check env var for license key
-    license_key = os.getenv("LICENSE_KEY", "")
+    # Check env vars / settings for the license key
+    license_key = _get_license_key()
     if not license_key:
         _pro_cache = {"result": False, "timestamp": now}
         return False
@@ -271,10 +299,16 @@ def is_pro() -> bool:
     # Verify via the two-tier system (JSON first, then API)
     result = verify_license(license_key)
     valid = result.get("valid", False)
+    if not valid and _is_network_failure(result.get("reason")):
+        # Network/server problem — fall back to the locally cached license
+        if _local_check_pro(license_key):
+            valid = True
+            logger.info("Network unavailable — Pro granted via local license cache")
+
     _pro_cache = {"result": valid, "timestamp": now}
 
-    # If valid, also cache locally in SQLite for offline fallback
-    if valid:
+    # If verified online, also cache locally in SQLite for offline fallback
+    if result.get("valid"):
         _save_license_locally(license_key, result)
 
     return valid
@@ -333,6 +367,10 @@ def _local_check_pro(key: str) -> bool:
 
 def activate_license(key: str, email: str = "") -> bool:
     """Activate a Pro license key. Validates against the two-tier system, then saves locally."""
+    global _pro_cache
+    # Invalidate the cached Pro status so is_pro() re-checks with the new key
+    _pro_cache = {"result": None, "timestamp": 0.0}
+
     if not key or len(key) < 10:
         return False
 
@@ -352,10 +390,7 @@ def activate_license(key: str, email: str = "") -> bool:
 
 def check_license_valid() -> bool:
     """Check if current license is valid (local SQLite check with 7-day cache expiry)"""
-    license_key = os.getenv("LICENSE_KEY", "")
-    if not license_key:
-        settings = get_settings()
-        license_key = settings.pro_license_key
+    license_key = _get_license_key()
     if not license_key:
         return False
 
@@ -374,10 +409,7 @@ def check_license_valid() -> bool:
 
 def check_license_with_api() -> dict:
     """Full license check. Returns detailed info about the license status."""
-    license_key = os.getenv("LICENSE_KEY", "")
-    if not license_key:
-        settings = get_settings()
-        license_key = settings.pro_license_key
+    license_key = _get_license_key()
     if not license_key:
         return {"valid": False, "reason": "no_key", "tier": "free"}
 

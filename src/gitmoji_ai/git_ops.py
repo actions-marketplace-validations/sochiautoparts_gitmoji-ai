@@ -27,10 +27,21 @@ class RepoInfo:
 def get_repo_info(path: str = ".") -> RepoInfo:
     """Get basic repository information"""
     try:
+        # Repo check that also works in repositories without any commits
+        inside = run_git(["rev-parse", "--is-inside-work-tree"], path, check=False)
+        if inside.strip() != "true":
+            raise ValueError(f"not inside a git work tree: {path}")
+
         root = run_git(["rev-parse", "--show-toplevel"], path)
         name = Path(root).name
         branch = run_git(["branch", "--show-current"], path)
-        total = int(run_git(["rev-list", "--count", "HEAD"], path))
+
+        # `rev-list --count HEAD` fails in an empty repo (no commits yet) —
+        # count commits separately so an empty repo is still a valid repo
+        try:
+            total = int(run_git(["rev-list", "--count", "HEAD"], path, check=False))
+        except (ValueError, TypeError):
+            total = 0
 
         # Use subprocess directly for exit-code-based checks
         staged_result = subprocess.run(

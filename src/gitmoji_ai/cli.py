@@ -35,6 +35,22 @@ app = typer.Typer(
 )
 
 
+def _default_language() -> str:
+    """Default language from settings (env GMAI_DEFAULT_LANGUAGE / .env), 'en' fallback."""
+    try:
+        return get_settings().default_language or "en"
+    except Exception:
+        return "en"
+
+
+def _default_style() -> str:
+    """Default commit style from settings (env GMAI_COMMIT_STYLE / .env), 'conventional' fallback."""
+    try:
+        return get_settings().commit_style or "conventional"
+    except Exception:
+        return "conventional"
+
+
 def version_callback(value: bool):
     if value:
         console.print(f"[bold green]gitmoji-ai[/] v{__version__}")
@@ -53,8 +69,8 @@ def main(
 
 @app.command()
 def commit(
-    style: str = typer.Option("conventional", "--style", "-s", help="Commit style: conventional, emoji, plain, semantic-release (Pro), gitmoji-dict (Pro)"),
-    language: str = typer.Option("en", "--lang", "-l", help="Language: en, ru, es, de, fr"),
+    style: str = typer.Option(_default_style, "--style", "-s", help="Commit style: conventional, emoji, plain, semantic-release (Pro), gitmoji-dict (Pro)"),
+    language: str = typer.Option(_default_language, "--lang", "-l", help="Language: en, ru, es, de, fr"),
     stage: bool = typer.Option(False, "--stage", "-a", help="Stage all changes before committing"),
     sign: bool = typer.Option(False, "--sign", "-S", help="GPG-sign the commit"),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation"),
@@ -87,9 +103,10 @@ def commit(
     from gitmoji_ai.team import load_team_config as _load_team
     _team_cfg = _load_team(path)
     if _team_cfg:
-        if language == "en" and _team_cfg.language != "en":
+        # An option still equal to its settings-derived default counts as "not set"
+        if language == _default_language() and _team_cfg.language != language:
             language = _team_cfg.language
-        if style == "conventional" and _team_cfg.commit_style != "conventional":
+        if style == _default_style() and _team_cfg.commit_style != style:
             style = _team_cfg.commit_style
 
     # Get repo info
@@ -222,7 +239,7 @@ def commit(
 def changelog(
     version: str = typer.Option("Unreleased", "--version", "-v", help="Version tag"),
     format: str = typer.Option("keepachangelog", "--format", "-f", help="Format: keepachangelog, angular"),
-    language: str = typer.Option("en", "--lang", "-l", help="Language: en, ru, es, de, fr, ja, zh"),
+    language: str = typer.Option(_default_language, "--lang", "-l", help="Language: en, ru, es, de, fr, ja, zh"),
     since: Optional[str] = typer.Option(None, "--since", help="Generate changes since tag"),
     output: Optional[str] = typer.Option(None, "--output", "-o", help="Output file path"),
     no_ai: bool = typer.Option(False, "--no-ai", help="Disable AI, use manual grouping"),
@@ -263,7 +280,7 @@ def changelog(
     # Output
     if output:
         from gitmoji_ai.changelog import update_changelog_file
-        update_changelog_file(content, output, format)
+        update_changelog_file(content, output, format, version)
         console.print(f"[green]✅ Changelog updated in {output}[/green]")
     else:
         console.print(content)
@@ -337,7 +354,7 @@ def pro(
             # User provided GitHub PAT
             console.print("[dim]🔍 Checking GitHub sponsor status...[/dim]")
             from gitmoji_ai.sponsors import validate_sponsor_token
-            is_pro, info = validate_sponsor_token(key)
+            is_pro, info, network_error = validate_sponsor_token(key)
             if is_pro and info:
                 console.print(Panel(
                     f"[bold green]✅ Pro activated via GitHub Sponsors![/bold green]\n\n"
@@ -348,6 +365,9 @@ def pro(
                     title="⭐ Pro Active",
                     border_style="green",
                 ))
+            elif network_error:
+                console.print("[red]❌ Network error: could not reach GitHub to check sponsor status.[/red]")
+                console.print("[dim]Check your internet connection and try again. Nothing was saved or deleted.[/dim]")
             else:
                 console.print(Panel(
                     "[yellow]⚠️ Not a sponsor yet[/yellow]\n\n"
@@ -441,8 +461,8 @@ def pro(
 @app.command()
 def suggest(
     path: str = typer.Option(".", "--path", "-p", help="Repository path"),
-    language: str = typer.Option("en", "--lang", "-l", help="Language: en, ru, es, de, fr"),
-    style: str = typer.Option("conventional", "--style", "-s", help="Commit style: conventional, emoji, plain, semantic-release (Pro), gitmoji-dict (Pro)"),
+    language: str = typer.Option(_default_language, "--lang", "-l", help="Language: en, ru, es, de, fr"),
+    style: str = typer.Option(_default_style, "--style", "-s", help="Commit style: conventional, emoji, plain, semantic-release (Pro), gitmoji-dict (Pro)"),
     quiet: bool = typer.Option(False, "--quiet", "-q", help="Output only the message text (for hooks)"),
 ):
     """💡 Quick suggest a commit message (non-interactive, for git hooks)"""

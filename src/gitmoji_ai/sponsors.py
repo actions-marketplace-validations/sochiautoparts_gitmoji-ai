@@ -32,6 +32,15 @@ GITHUB_CLIENT_ID = os.environ.get("GITHUB_CLIENT_ID", "")  # Set via env var; em
 
 SPONSOR_TARGET = "sochiautoparts"  # GitHub account to sponsor
 
+
+class SponsorNetworkError(Exception):
+    """GitHub could not be reached (timeout / connection error).
+
+    Raised by the sponsor checks so callers can distinguish a network
+    failure (token status UNKNOWN — the token must be kept) from a
+    definitively invalid token (safe to delete).
+    """
+
 # === Data ===
 @dataclass
 class SponsorInfo:
@@ -39,7 +48,7 @@ class SponsorInfo:
     github_login: str
     github_id: int
     tier_amount: int       # USD cents per month
-    tier_name: str         # "Pro" or "Team"
+    tier_name: str         # "Free", "Pro" or "Team"
     is_active: bool
     expires_at: float      # timestamp
 
@@ -94,6 +103,7 @@ def check_sponsor_status(github_token: str) -> Optional[SponsorInfo]:
     
     Uses GitHub GraphQL API to check sponsorships.
     Returns SponsorInfo if active sponsor, None otherwise.
+    Raises SponsorNetworkError when GitHub cannot be reached.
     """
     query = """
     query($login: String!) {
@@ -144,7 +154,12 @@ def check_sponsor_status(github_token: str) -> Optional[SponsorInfo]:
             if sponsorable.lower() == SPONSOR_TARGET.lower():
                 tier = sponsorship.get("tier", {})
                 amount = tier.get("monthlyPriceInCents", 0) // 100  # cents to dollars
-                tier_name = "Team" if amount >= SPONSOR_TIER_TEAM else "Pro"
+                if amount >= SPONSOR_TIER_TEAM:
+                    tier_name = "Team"
+                elif amount >= SPONSOR_TIER_PRO:
+                    tier_name = "Pro"
+                else:
+                    tier_name = "Free"  # below the Pro threshold
 
                 return SponsorInfo(
                     github_login=user_login,
@@ -157,13 +172,20 @@ def check_sponsor_status(github_token: str) -> Optional[SponsorInfo]:
 
         return None  # Not a sponsor
 
+    except (httpx.TimeoutException, httpx.ConnectError) as exc:
+        raise SponsorNetworkError(f"cannot reach GitHub API: {exc}") from exc
     except Exception as e:
         logger.error(f"Failed to check sponsor status: {e}")
         return None
 
 
 def _get_github_login(token: str) -> Optional[str]:
-    """Get GitHub username from token"""
+    """Get GitHub username from token.
+
+    Returns None for invalid/rejected tokens (HTTP 401/403 and other HTTP
+    errors). Raises SponsorNetworkError when GitHub cannot be reached
+    (timeout / connection error).
+    """
     try:
         response = httpx.get(
             "https://api.github.com/user",
@@ -173,8 +195,12 @@ def _get_github_login(token: str) -> Optional[str]:
             },
             timeout=10,
         )
+        if response.status_code in (401, 403):
+            return None  # token rejected — definitive answer
         response.raise_for_status()
         return response.json().get("login")
+    except (httpx.TimeoutException, httpx.ConnectError) as exc:
+        raise SponsorNetworkError(f"cannot reach github.com: {exc}") from exc
     except Exception:
         return None
 
@@ -269,12 +295,16 @@ def device_flow_login() -> Optional[str]:
                 
                 # Step 4: Validate sponsor status
                 print("🔍 Checking sponsor status...")
-                is_pro, info = validate_sponsor_token(token)
+                is_pro, info, network_error = validate_sponsor_token(token)
                 if is_pro and info:
                     print(f"\n⭐ Pro activated via GitHub Sponsors!")
                     print(f"  Account: @{info.github_login}")
                     print(f"  Tier: {info.tier_name} (${info.tier_amount}/month)")
                     return token
+                elif network_error:
+                    print("\n⚠️ Network error — could not verify sponsor status.")
+                    print("  Check your connection and run again later: gmai pro login <your-pat>")
+                    return None
                 else:
                     print("\n⚠️ Authorization successful, but you're not a sponsor yet.")
                     print("  Sponsor the project at: https://github.com/sponsors/sochiautoparts")
@@ -310,24 +340,35 @@ def device_flow_login() -> Optional[str]:
         return None
 
 
-def validate_sponsor_token(token: str) -> tuple[bool, Optional[SponsorInfo]]:
+def validate_sponsor_token(token: str) -> tuple[bool, Optional[SponsorInfo], bool]:
     """
     Validate a GitHub token and check sponsor status.
-    Returns (is_pro, sponsor_info)
+    Returns (is_pro, sponsor_info, network_error).
+
+    network_error=True means GitHub was unreachable — the token status is
+    UNKNOWN and a saved token must NOT be deleted.
+    Only Pro/Team tier sponsors get is_pro=True.
     """
     # Check if token is valid
-    login = _get_github_login(token)
+    try:
+        login = _get_github_login(token)
+    except SponsorNetworkError:
+        return False, None, True
     if not login:
-        return False, None
+        return False, None, False
 
     # Check sponsor status
-    info = check_sponsor_status(token)
-    if info and info.is_active:
+    try:
+        info = check_sponsor_status(token)
+    except SponsorNetworkError:
+        return False, None, True
+
+    if info and info.is_active and info.tier_name in ("Pro", "Team"):
         # Save token for future checks
         save_github_token(token)
-        return True, info
+        return True, info, False
 
-    return False, None
+    return False, None, False
 
 
 def is_pro_via_sponsor() -> tuple[bool, Optional[str]]:
@@ -346,10 +387,15 @@ def is_pro_via_sponsor() -> tuple[bool, Optional[str]]:
         return False, None
 
     # Validate
-    is_pro, info = validate_sponsor_token(github_token)
+    is_pro, info, network_error = validate_sponsor_token(github_token)
     if is_pro and info:
         return True, f"{info.tier_name} (GitHub Sponsor)"
 
-    # Token invalid or not a sponsor anymore
+    if network_error:
+        # GitHub unreachable — token status unknown: keep the token and retry later
+        logger.warning("GitHub unreachable while verifying sponsor token — keeping saved token")
+        return False, None
+
+    # Token invalid or not a (Pro/Team) sponsor anymore
     clear_github_token()
     return False, None

@@ -39,6 +39,9 @@ inputs:
     required: false
     default: 'keepachangelog'
 
+permissions:
+  contents: write
+
 runs:
   using: 'composite'
   steps:
@@ -59,6 +62,9 @@ runs:
         GMAI_COMMIT_STYLE: ${{ inputs.style }}
         GMAI_OPENAI_MODEL: ${{ inputs.model }}
         LICENSE_KEY: ${{ inputs.license-key }}
+        # In CI there are no staged changes — analyze the diff against the
+        # base branch of the pull request instead (see suggest.py).
+        GMAI_BASE_BRANCH: ${{ github.event.pull_request.base.ref || 'main' }}
       run: |
         echo "🤖 GitMoji AI: Analyzing changes..."
         gmai info
@@ -78,6 +84,8 @@ runs:
       env:
         GMAI_OPENAI_API_KEY: ${{ inputs.openai-api-key }}
         GMAI_DEFAULT_LANGUAGE: ${{ inputs.language }}
+        GMAI_COMMIT_STYLE: ${{ inputs.style }}
+        GMAI_OPENAI_MODEL: ${{ inputs.model }}
         LICENSE_KEY: ${{ inputs.license-key }}
       run: |
         echo "📝 Generating changelog..."
@@ -92,3 +100,4 @@ runs:
         git config user.email "bot@gitmoji-ai.dev"
         git add CHANGELOG.md
         git diff --staged --quiet || git commit -m "📝 docs: update CHANGELOG.md [skip ci]"
+        git push
