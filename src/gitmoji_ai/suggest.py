@@ -4,11 +4,12 @@ Outputs a single commit message without interactive prompts
 """
 
 import asyncio
+import os
 import sys
-from gitmoji_ai.git_ops import get_staged_diff, get_unstaged_diff
+from gitmoji_ai.git_ops import get_staged_diff, get_unstaged_diff, get_diff_against_branch
 from gitmoji_ai.ai_engine import generate_commit_messages
 from gitmoji_ai.config import get_settings
-from gitmoji_ai.usage import check_limit, is_pro
+from gitmoji_ai.usage import check_limit, is_pro, track_usage
 
 
 def suggest_commit(path: str = ".", language: str = "en", style: str = "conventional") -> str:
@@ -24,6 +25,12 @@ def suggest_commit(path: str = ".", language: str = "en", style: str = "conventi
     if not diff:
         diff = get_unstaged_diff(path)
     if not diff:
+        # CI (GitHub Actions): there are no staged/unstaged changes — analyze
+        # the diff against the base branch of the pull request instead.
+        base_branch = (os.environ.get("GMAI_BASE_BRANCH") or "").strip()
+        if base_branch:
+            diff = get_diff_against_branch(base_branch, path)
+    if not diff:
         return ""
 
     suggestions = asyncio.run(generate_commit_messages(diff, language, style))
@@ -32,5 +39,7 @@ def suggest_commit(path: str = ".", language: str = "en", style: str = "conventi
         # Add watermark for free tier
         if not is_pro():
             message += " (gitmoji-ai free)"
+        # Count the suggestion towards the free-tier monthly limit
+        track_usage("commit")
         return message
     return ""

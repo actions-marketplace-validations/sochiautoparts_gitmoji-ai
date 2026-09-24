@@ -35,6 +35,22 @@ app = typer.Typer(
 )
 
 
+def _default_language() -> str:
+    """Default language from settings (env GMAI_DEFAULT_LANGUAGE / .env), 'en' fallback."""
+    try:
+        return get_settings().default_language or "en"
+    except Exception:
+        return "en"
+
+
+def _default_style() -> str:
+    """Default commit style from settings (env GMAI_COMMIT_STYLE / .env), 'conventional' fallback."""
+    try:
+        return get_settings().commit_style or "conventional"
+    except Exception:
+        return "conventional"
+
+
 def version_callback(value: bool):
     if value:
         console.print(f"[bold green]gitmoji-ai[/] v{__version__}")
@@ -53,8 +69,8 @@ def main(
 
 @app.command()
 def commit(
-    style: str = typer.Option("conventional", "--style", "-s", help="Commit style: conventional, emoji, plain, semantic-release (Pro), gitmoji-dict (Pro)"),
-    language: str = typer.Option("en", "--lang", "-l", help="Language: en, ru, es, de, fr"),
+    style: str = typer.Option(_default_style, "--style", "-s", help="Commit style: conventional, emoji, plain, semantic-release (Pro), gitmoji-dict (Pro)"),
+    language: str = typer.Option(_default_language, "--lang", "-l", help="Language: en, ru, es, de, fr"),
     stage: bool = typer.Option(False, "--stage", "-a", help="Stage all changes before committing"),
     sign: bool = typer.Option(False, "--sign", "-S", help="GPG-sign the commit"),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation"),
@@ -87,9 +103,10 @@ def commit(
     from gitmoji_ai.team import load_team_config as _load_team
     _team_cfg = _load_team(path)
     if _team_cfg:
-        if language == "en" and _team_cfg.language != "en":
+        # An option still equal to its settings-derived default counts as "not set"
+        if language == _default_language() and _team_cfg.language != language:
             language = _team_cfg.language
-        if style == "conventional" and _team_cfg.commit_style != "conventional":
+        if style == _default_style() and _team_cfg.commit_style != style:
             style = _team_cfg.commit_style
 
     # Get repo info
@@ -222,7 +239,7 @@ def commit(
 def changelog(
     version: str = typer.Option("Unreleased", "--version", "-v", help="Version tag"),
     format: str = typer.Option("keepachangelog", "--format", "-f", help="Format: keepachangelog, angular"),
-    language: str = typer.Option("en", "--lang", "-l", help="Language: en, ru, es, de, fr, ja, zh"),
+    language: str = typer.Option(_default_language, "--lang", "-l", help="Language: en, ru, es, de, fr, ja, zh"),
     since: Optional[str] = typer.Option(None, "--since", help="Generate changes since tag"),
     output: Optional[str] = typer.Option(None, "--output", "-o", help="Output file path"),
     no_ai: bool = typer.Option(False, "--no-ai", help="Disable AI, use manual grouping"),
@@ -263,7 +280,7 @@ def changelog(
     # Output
     if output:
         from gitmoji_ai.changelog import update_changelog_file
-        update_changelog_file(content, output, format)
+        update_changelog_file(content, output, format, version)
         console.print(f"[green]✅ Changelog updated in {output}[/green]")
     else:
         console.print(content)
@@ -337,7 +354,7 @@ def pro(
             # User provided GitHub PAT
             console.print("[dim]🔍 Checking GitHub sponsor status...[/dim]")
             from gitmoji_ai.sponsors import validate_sponsor_token
-            is_pro, info = validate_sponsor_token(key)
+            is_pro, info, network_error = validate_sponsor_token(key)
             if is_pro and info:
                 console.print(Panel(
                     f"[bold green]✅ Pro activated via GitHub Sponsors![/bold green]\n\n"
@@ -348,6 +365,9 @@ def pro(
                     title="⭐ Pro Active",
                     border_style="green",
                 ))
+            elif network_error:
+                console.print("[red]❌ Network error: could not reach GitHub to check sponsor status.[/red]")
+                console.print("[dim]Check your internet connection and try again. Nothing was saved or deleted.[/dim]")
             else:
                 console.print(Panel(
                     "[yellow]⚠️ Not a sponsor yet[/yellow]\n\n"
@@ -441,8 +461,8 @@ def pro(
 @app.command()
 def suggest(
     path: str = typer.Option(".", "--path", "-p", help="Repository path"),
-    language: str = typer.Option("en", "--lang", "-l", help="Language: en, ru, es, de, fr"),
-    style: str = typer.Option("conventional", "--style", "-s", help="Commit style: conventional, emoji, plain, semantic-release (Pro), gitmoji-dict (Pro)"),
+    language: str = typer.Option(_default_language, "--lang", "-l", help="Language: en, ru, es, de, fr"),
+    style: str = typer.Option(_default_style, "--style", "-s", help="Commit style: conventional, emoji, plain, semantic-release (Pro), gitmoji-dict (Pro)"),
     quiet: bool = typer.Option(False, "--quiet", "-q", help="Output only the message text (for hooks)"),
 ):
     """💡 Quick suggest a commit message (non-interactive, for git hooks)"""
@@ -548,29 +568,16 @@ def team(
         try:
             config_path = init_team_config(path)
             console.print(Panel(
-                f"[bold green]✅ Team config created![/bold green]
-
-"
-                f"  File: [cyan]{config_path}[/cyan]
-
-"
-                f"Edit the file to define your team's commit conventions.
-"
-                f"Commit it to the repo so all team members follow the same rules.
-
-"
-                f"  [bold]Supported rules:[/bold]
-"
-                f"  • required_types — only allow specific commit types
-"
-                f"  • required_scopes — enforce scope usage
-"
-                f"  • max_subject_length — limit subject line length
-"
-                f"  • custom_types — alias custom types to conventional types
-"
-                f"  • commit_style — set team-wide commit style
-"
+                f"[bold green]✅ Team config created![/bold green]\n\n"
+                f"  File: [cyan]{config_path}[/cyan]\n\n"
+                f"Edit the file to define your team's commit conventions.\n"
+                f"Commit it to the repo so all team members follow the same rules.\n\n"
+                f"  [bold]Supported rules:[/bold]\n"
+                f"  • required_types — only allow specific commit types\n"
+                f"  • required_scopes — enforce scope usage\n"
+                f"  • max_subject_length — limit subject line length\n"
+                f"  • custom_types — alias custom types to conventional types\n"
+                f"  • commit_style — set team-wide commit style\n"
                 f"  • disallowed_types — ban certain commit types",
                 title="👥 Team Config",
                 border_style="green",
@@ -590,18 +597,12 @@ def team(
 
         config = result["config"]
         console.print(Panel(
-            f"  [bold]Style:[/bold] {config.commit_style}
-"
-            f"  [bold]Language:[/bold] {config.language}
-"
-            f"  [bold]Max subject length:[/bold] {config.max_subject_length}
-"
-            f"  [bold]Require scope:[/bold] {'Yes' if config.require_scope else 'No'}
-"
-            f"  [bold]Required types:[/bold] {', '.join(config.required_types) or 'All'}
-"
-            f"  [bold]Required scopes:[/bold] {', '.join(config.required_scopes) or 'Any'}
-"
+            f"  [bold]Style:[/bold] {config.commit_style}\n"
+            f"  [bold]Language:[/bold] {config.language}\n"
+            f"  [bold]Max subject length:[/bold] {config.max_subject_length}\n"
+            f"  [bold]Require scope:[/bold] {'Yes' if config.require_scope else 'No'}\n"
+            f"  [bold]Required types:[/bold] {', '.join(config.required_types) or 'All'}\n"
+            f"  [bold]Required scopes:[/bold] {', '.join(config.required_scopes) or 'Any'}\n"
             f"  [bold]Disallowed types:[/bold] {', '.join(config.disallowed_types) or 'None'}",
             title="👥 Team Rules",
             border_style="blue",
@@ -675,14 +676,9 @@ def support():
 """
 
     console.print(Panel(
-        f"[bold]🆘 Support Request Template[/bold]
-
-"
-        f"Copy the template below and create a new issue:
-"
-        f"[link]https://github.com/sochiautoparts/gitmoji-ai/issues/new[/link]
-
-"
+        f"[bold]🆘 Support Request Template[/bold]\n\n"
+        f"Copy the template below and create a new issue:\n"
+        f"[link]https://github.com/sochiautoparts/gitmoji-ai/issues/new[/link]\n\n"
         f"[dim]The template includes your environment info for faster debugging.[/dim]",
         border_style="blue",
     ))

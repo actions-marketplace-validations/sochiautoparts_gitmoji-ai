@@ -445,6 +445,8 @@ Provide {num_suggestions} variations."""
         client = AsyncOpenAI(
             api_key=settings.openai_api_key,
             base_url=settings.openai_base_url,
+            timeout=60.0,
+            max_retries=2,
         )
 
         response = await client.chat.completions.create(
@@ -470,12 +472,21 @@ def _parse_commit_suggestions(content: str, style: str) -> list[CommitSuggestion
     """Parse AI response into CommitSuggestion objects"""
     try:
         data = json.loads(content)
-        suggestions = data.get("suggestions", data.get("commits", []))
+        # Check the type FIRST — the model may return a bare JSON array
+        # instead of an object with a "suggestions" key.
         if isinstance(data, list):
             suggestions = data
+        elif isinstance(data, dict):
+            suggestions = data.get("suggestions", data.get("commits", []))
+        else:
+            suggestions = []
+        if not isinstance(suggestions, list):
+            suggestions = []
 
         results = []
         for s in suggestions[:3]:
+            if not isinstance(s, dict):
+                continue
             msg_type = s.get("type", "chore")
             emoji = s.get("emoji", GITMOJI_MAP.get(msg_type, "🔧"))
             results.append(CommitSuggestion(

@@ -308,6 +308,8 @@ async def _ai_changelog(
         client = AsyncOpenAI(
             api_key=settings.openai_api_key,
             base_url=settings.openai_base_url,
+            timeout=60.0,
+            max_retries=2,
         )
 
         response = await client.chat.completions.create(
@@ -327,12 +329,28 @@ async def _ai_changelog(
         return _manual_changelog(grouped)
 
 
+def _strip_section_header(section: str) -> str:
+    """Drop the leading '## ...' heading line from a generated section."""
+    lines = section.splitlines()
+    if lines and lines[0].lstrip().startswith("## "):
+        return "\n".join(lines[1:]).strip()
+    return section.strip()
+
+
 def update_changelog_file(
     new_section: str,
     changelog_path: str = "CHANGELOG.md",
     format_style: str = "keepachangelog",
+    version: Optional[str] = None,
 ) -> bool:
-    """Insert new section into existing CHANGELOG.md"""
+    """Insert a new section into an existing CHANGELOG.md (Keep a Changelog order).
+
+    - version "Unreleased": the new entries are merged INTO the existing
+      '## [Unreleased]' section, right after its header (newest first).
+    - a concrete version: the new '## [version] - date' section is inserted
+      right AFTER the whole Unreleased section, before the next '## '
+      heading (versions in descending order).
+    """
     path = Path(changelog_path)
 
     if not path.exists():
@@ -342,20 +360,50 @@ def update_changelog_file(
 
     existing = path.read_text(encoding="utf-8")
 
-    # Find insertion point (after the header)
-    if format_style == "keepachangelog":
-        # Insert after "## [Unreleased]" or after the header
-        marker = "## [Unreleased]"
-        if marker in existing:
-            idx = existing.index(marker) + len(marker)
-            # Skip to the end of the Unreleased section header
-            idx = existing.find("\n", idx) + 1
-        else:
-            # Insert after the first ## heading or after header
-            idx = existing.find("\n\n") + 2 if "\n\n" in existing else len(existing)
-    else:
-        idx = existing.find("\n\n") + 2 if "\n\n" in existing else len(existing)
+    if version is None:
+        # Detect the version from the generated section header
+        # ("## [1.2.0] - date" for keepachangelog, "## 1.2.0 (date)" for angular)
+        match = re.match(r"\s*## \[?([^\]\s]+)\]?", new_section)
+        version = match.group(1) if match else "Unreleased"
 
-    updated = existing[:idx] + "\n" + new_section + "\n" + existing[idx:]
+    if format_style == "keepachangelog":
+        marker = "## [Unreleased]"
+        marker_idx = existing.find(marker)
+        if marker_idx != -1 and version == "Unreleased":
+            # Merge new entries into the existing Unreleased section
+            # (right after the header, before the existing content)
+            line_end = existing.find("\n", marker_idx)
+            insert_at = line_end + 1 if line_end != -1 else len(existing)
+            body = _strip_section_header(new_section)
+            updated = (
+                existing[:insert_at].rstrip("\n") + "\n\n" + body + "\n\n"
+                + existing[insert_at:].lstrip("\n")
+            )
+        elif marker_idx != -1:
+            # Concrete version — insert AFTER the whole Unreleased section,
+            # before the next '## ' heading (or at the end of the file)
+            next_header = existing.find("\n## ", marker_idx)
+            insert_at = next_header + 1 if next_header != -1 else len(existing)
+            updated = (
+                existing[:insert_at].rstrip("\n") + "\n\n" + new_section.strip("\n") + "\n\n"
+                + existing[insert_at:].lstrip("\n")
+            )
+        else:
+            # No Unreleased section yet — add the new section before the first
+            # existing '## ' heading, or append at the end of the file
+            first_header = existing.find("\n## ")
+            insert_at = first_header + 1 if first_header != -1 else len(existing)
+            tail = existing[insert_at:].lstrip("\n")
+            if tail:
+                updated = (
+                    existing[:insert_at].rstrip("\n") + "\n\n" + new_section.strip("\n") + "\n\n" + tail
+                )
+            else:
+                updated = existing.rstrip("\n") + "\n\n" + new_section.strip("\n") + "\n"
+    else:
+        # angular and other formats — insert after the file header
+        idx = existing.find("\n\n") + 2 if "\n\n" in existing else len(existing)
+        updated = existing[:idx] + "\n" + new_section + "\n" + existing[idx:]
+
     path.write_text(updated, encoding="utf-8")
     return True
